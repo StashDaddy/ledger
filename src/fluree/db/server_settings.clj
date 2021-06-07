@@ -7,6 +7,7 @@
             [fluree.db.ledger.storage.filestore :as filestore]
             [fluree.db.ledger.storage.memorystore :as memorystore]
             [fluree.db.ledger.storage.s3store :as s3store]
+            [fluree.db.ledger.storage.stashstore :as stashstore]
             [fluree.db.serde.avro :as avro]
             [fluree.db.serde.none :as none]
             [clojure.core.async :as async]
@@ -42,7 +43,7 @@
    :fdb-group-snapshot-threshold 200                        ;; how many new index entries before creating a new snapshot
    :fdb-group-log-history        5                          ;; number of historical log files to keep around
 
-   :fdb-storage-type             "file"                     ;; file, memory, s3
+   :fdb-storage-type             "file"                     ;; file, memory, s3, stash
    :fdb-storage-file-root        "./data/"
    :fdb-storage-file-directory   nil                        ;; deprecated in favor of fdb-storage-file-root
    :fdb-storage-file-group-path  "group/"
@@ -51,6 +52,14 @@
    :fdb-storage-s3-bucket        nil
    :fdb-storage-s3-group-prefix  "group/"
    :fdb-storage-s3-ledger-prefix "ledger/"
+
+   :fdb-storage-stash-url        nil
+   :fdb-storage-stash-group-prefix  "group/"
+   :fdb-storage-stash-ledger-prefix "ledger/"
+   :fdb-storage-stash-apiid     nil
+   :fdb-storage-stash-apipw     nil
+   :fdb-storage-stash-username  nil
+   :fdb-storage-stash-filekey   nil
 
    :fdb-memory-cache             "200mb"
    :fdb-memory-reindex           "1mb"
@@ -417,6 +426,14 @@
         file-ledger-storage-path (file-storage-path :ledger settings)
         _                        (log/debug "generate-conn-settings file-ledger-storage-path:" file-ledger-storage-path)
         s3-ledger-storage-prefix (:fdb-storage-s3-ledger-prefix settings)
+        stash-conn               {:id (some-> settings :fdb-storage-stash-apiid)
+                                   :pw (some-> settings :fdb-storage-stash-apipw)
+                                   :endpoint (some-> settings :fdb-storage-stash-url)
+                                   :filekey (some-> settings :fdb-storage-stash-filekey)
+                                   :username (some-> settings :fdb-storage-stash-username)
+                                   :group-prefix (some-> settings :fdb-storage-stash-group-prefix)
+                                   :ledger-prefix (some-> settings :fdb-storage-stash-ledger-prefix)
+                                   :verbose (some-> settings :fdb-storage-stash-log-verbosity)}
         storage-read             (case storage-type
                                    :file (filestore/connection-storage-read
                                            file-ledger-storage-path
@@ -425,13 +442,17 @@
                                          s3-conn
                                          s3-ledger-storage-prefix
                                          encryption-key)
-                                   :memory memorystore/connection-storage-read)
+                                   :memory memorystore/connection-storage-read
+                                   :stash (stashstore/connection-storage-read
+                                            stash-conn))
         storage-exists           (case storage-type
                                    :file (filestore/connection-storage-exists?
                                            file-ledger-storage-path)
                                    :s3 (s3store/connection-storage-exists?
                                          s3-conn s3-ledger-storage-prefix)
-                                   :memory memorystore/connection-storage-read)
+                                   :memory memorystore/connection-storage-read
+                                   :stash (stashstore/connection-storage-exists?
+                                            stash-conn))
         storage-write            (case storage-type
                                    :file (filestore/connection-storage-write
                                            file-ledger-storage-path
@@ -439,24 +460,31 @@
                                    :s3 (s3store/connection-storage-write
                                          s3-conn s3-ledger-storage-prefix
                                          encryption-key)
-                                   :memory memorystore/connection-storage-write)
+                                   :memory memorystore/connection-storage-write
+                                   :stash (stashstore/connection-storage-write
+                                            stash-conn))
         storage-rename           (case storage-type
                                    :file (filestore/connection-storage-rename
                                            file-ledger-storage-path)
                                    :s3 (s3store/connection-storage-rename
                                          s3-conn s3-ledger-storage-prefix)
-                                   :memory nil)
+                                   :memory nil
+                                   :stash (stashstore/connection-storage-rename
+                                            stash-conn))
         storage-list             (case storage-type
                                    :file (filestore/connection-storage-list
                                            file-ledger-storage-path)
                                    :s3 (s3store/connection-storage-list
                                          s3-conn s3-ledger-storage-prefix)
-                                   :memory nil)
+                                   :memory nil
+                                   :stash (stashstore/connection-storage-list
+                                            stash-conn))
         serializer               (get-serializer settings)
         close-fn                 (case storage-type
                                    :file (fn [] nil)
                                    :memory #(memorystore/close)
-                                   :s3 #(s3store/close s3-conn))]
+                                   :s3 #(s3store/close s3-conn)
+                                   :stash #(stashstore/close stash-conn))]
     {:storage-type storage-type
      :servers      (:fdb-conn-servers settings)
      :options      {:transactor?    is-transactor?
@@ -490,6 +518,8 @@
                                      :s3-storage        (when (= :s3 storage-type)
                                                           {:bucket (:bucket s3-conn)
                                                            :prefix s3-ledger-storage-prefix})
+                                     :stash-storage     (when (= :stash storage-type)
+                                                          {:id (:id stash-conn)})
                                      :encryption-secret encryption-key}}}))
 
 
@@ -554,6 +584,15 @@
         file-group-storage-path  (file-storage-path :group settings)
         s3-ledger-storage-prefix (:fdb-storage-s3-ledger-prefix settings)
         s3-group-storage-prefix  (:fdb-storage-s3-group-prefix settings)
+        stash-conn               {:id (:fdb-storage-stash-apiid settings)
+                                   :pw (:fdb-storage-stash-apipw settings)
+                                   :endpoint (:fdb-storage-stash-url settings)
+                                   :filekey (:fdb-storage-stash-filekey settings)
+                                   :username (:fdb-storage-stash-username settings)
+                                   :group-prefix (:fdb-storage-stash-group-prefix settings)
+                                   :ledger-prefix (:fdb-storage-stash-ledger-prefix settings)}
+        stash-ledger-storage-prefix (:fdb-storage-stash-ledger-prefix settings)
+        stash-group-storage-prefix (:fdb-storage-stash-group-prefix settings)
         storage-ledger-write     (case storage-type
                                    (:file :memory) (filestore/connection-storage-write
                                                      file-ledger-storage-path
@@ -561,7 +600,9 @@
                                    :s3 (s3store/connection-storage-write
                                          s3-conn
                                          s3-ledger-storage-prefix
-                                         encryption-key))
+                                         encryption-key)
+                                   :stash (stashstore/connection-storage-write
+                                            stash-conn))
         storage-group-write      (case storage-type
                                    (:file :memory) (filestore/connection-storage-write
                                                      file-group-storage-path
@@ -569,7 +610,9 @@
                                    :s3 (s3store/connection-storage-write
                                          s3-conn
                                          s3-group-storage-prefix
-                                         encryption-key))
+                                         encryption-key)
+                                   :stash (stashstore/connection-storage-write
+                                            stash-conn))
         storage-ledger-read      (case storage-type
                                    (:file :memory) (filestore/connection-storage-read
                                                      file-ledger-storage-path
@@ -577,7 +620,9 @@
                                    :s3 (s3store/connection-storage-read
                                          s3-conn
                                          s3-ledger-storage-prefix
-                                         encryption-key))
+                                         encryption-key)
+                                   :stash (stashstore/connection-storage-read
+                                            stash-conn))
         storage-group-read       (case storage-type
                                    (:file :memory) (filestore/connection-storage-read
                                                      file-group-storage-path
@@ -585,47 +630,65 @@
                                    :s3 (s3store/connection-storage-read
                                          s3-conn
                                          s3-group-storage-prefix
-                                         encryption-key))
+                                         encryption-key)
+                                   :stash (stashstore/connection-storage-read
+                                            stash-conn))
         storage-ledger-rename    (case storage-type
                                    (:file :memory) (filestore/connection-storage-rename
                                                      file-ledger-storage-path)
                                    :s3 (s3store/connection-storage-rename
-                                         s3-conn s3-ledger-storage-prefix))
+                                         s3-conn s3-ledger-storage-prefix)
+                                   :stash (stashstore/connection-storage-rename
+                                            stash-conn))
         storage-group-rename     (case storage-type
                                    (:file :memory) (filestore/connection-storage-rename
                                                      file-group-storage-path)
                                    :s3 (s3store/connection-storage-rename
-                                         s3-conn s3-group-storage-prefix))
+                                         s3-conn s3-group-storage-prefix)
+                                   :stash (stashstore/connection-storage-rename
+                                            stash-conn))
         storage-ledger-exists    (case storage-type
                                    (:file :memory) (filestore/connection-storage-exists?
                                                      file-ledger-storage-path)
                                    :s3 (s3store/connection-storage-exists?
-                                         s3-conn s3-ledger-storage-prefix))
+                                         s3-conn s3-ledger-storage-prefix)
+                                   :stash (stashstore/connection-storage-exists?
+                                            stash-conn))
         storage-group-exists     (case storage-type
                                    (:file :memory) (filestore/connection-storage-exists?
                                                      file-group-storage-path)
                                    :s3 (s3store/connection-storage-exists?
-                                         s3-conn s3-group-storage-prefix))
+                                         s3-conn s3-group-storage-prefix)
+                                   :stash (stashstore/connection-storage-exists?
+                                            stash-conn))
         storage-ledger-delete    (case storage-type
                                    (:file :memory) (filestore/connection-storage-delete
                                                      file-ledger-storage-path)
                                    :s3 (s3store/connection-storage-delete
-                                         s3-conn s3-ledger-storage-prefix))
+                                         s3-conn s3-ledger-storage-prefix)
+                                   :stash (stashstore/connection-storage-delete
+                                            stash-conn))
         storage-group-delete     (case storage-type
                                    (:file :memory) (filestore/connection-storage-delete
                                                      file-group-storage-path)
                                    :s3 (s3store/connection-storage-delete
-                                         s3-conn s3-group-storage-prefix))
+                                         s3-conn s3-group-storage-prefix)
+                                   :stash (stashstore/connection-storage-delete
+                                            stash-conn))
         storage-ledger-list      (case storage-type
                                    (:file :memory) (filestore/connection-storage-list
                                                      file-ledger-storage-path)
                                    :s3 (s3store/connection-storage-list
-                                         s3-conn s3-ledger-storage-prefix))
+                                         s3-conn s3-ledger-storage-prefix)
+                                   :stash (stashstore/connection-storage-list
+                                            stash-conn))
         storage-group-list       (case storage-type
                                    (:file :memory) (filestore/connection-storage-list
                                                      file-group-storage-path)
                                    :s3 (s3store/connection-storage-list
-                                         s3-conn s3-group-storage-prefix))]
+                                         s3-conn s3-group-storage-prefix)
+                                   :stash (stashstore/connection-storage-list
+                                            stash-conn))]
     {:server-configs        group-servers                   ;; list of server-id@host:port, separated by commas, of servers to connect to. Can include or exclude this server (fdb-group-this-server).
      :this-server           this-server                     ;; id of this server
      :port                  (get-in group-servers [this-server :port]) ;; port this server will listen on for group messages

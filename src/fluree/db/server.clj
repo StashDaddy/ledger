@@ -133,6 +133,7 @@
                               storage-write-fn  (case storage-type
                                                   :file remote-writer
                                                   :s3 remote-writer
+                                                  :stash remote-writer
                                                   :memory memorystore/connection-storage-write)
                               producer-chan     (async/chan (async/sliding-buffer 100))
                               publish-fn        (local-message-process {:config config :group group} producer-chan)
