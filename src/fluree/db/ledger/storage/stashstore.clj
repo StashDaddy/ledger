@@ -34,7 +34,7 @@
 
 (defn connection-storage-read
   "Returns a function to read a file to the storage location"
-  [stash-conn]
+  [stash-conn base-path]
   (fn [f]
     (async/thread
       (read stash-conn f))))
@@ -63,14 +63,14 @@
 
 (defn connection-storage-write
   "Returns a function to write a byte-array 'data' to a file 'f' in the storage location"
-  [stash-conn]
+  [stash-conn base-path]
   (fn [f data]
     (async/thread
       (write stash-conn f data))))
 
 (defn list
   "Returns a sequence of data maps with keys `#{:name :size :url}` representing the files in this STASH vault"
-  [stash-conn]
+  [stash-conn base-path path]
   (let [options {:srcId (str "folderNames=My Home|" (:ledger-prefix stash-conn) ",outputType=1")
                  :id (:id stash-conn)
                  :pw (:pw stash-conn)
@@ -86,8 +86,8 @@
 
 (defn connection-storage-list
   "Returns a function to async list files in the storage location"
-  [stash-conn]
-  (fn []
+  [stash-conn base-path]
+  (fn [path]
     (async/thread
       (list stash-conn))))
 
@@ -109,7 +109,7 @@
 
 (defn connection-storage-exists?
   "Returns an async function to determine if a file 'f' exists in the storage location"
-  [stash-conn]
+  [stash-conn base-path]
   (fn [f]
     (async/thread
       (exists stash-conn f))))
@@ -124,7 +124,7 @@
 
 (defn connection-storage-delete
   "Returns an async function to delete the specified file 'f'"
-  [stash-conn]
+  [stash-conn base-path]
   (fn [f]
     (async/thread
       (delete stash-conn f))))
@@ -144,7 +144,7 @@
 
 (defn connection-storage-rename
   "Renames a file in the storage location"
-  [stash-conn]
+  [stash-conn base-path]
   (fn [old-f new-f]
     (async/thread
       (rename stash-conn old-f new-f))))
