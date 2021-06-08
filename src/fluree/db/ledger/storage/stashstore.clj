@@ -15,7 +15,7 @@
 (defn read
   "Reads a file 'f' from the STASH vault and returns a byte-array of the file's contents"
   [stash-conn f]
-  (let [options {:srcId (str "folderNames=My Home|" (:ledger-prefix stash-conn) ",fileName=" f)
+  (let [options {:srcId (str "folderNames=" (:ledger-prefix stash-conn) ",fileName=" f)
                  :id (:id stash-conn)
                  :pw (:pw stash-conn)
                  :endpoint (:endpoint stash-conn)
@@ -23,10 +23,13 @@
                  :filename f
                  :filekey (:filekey stash-conn)
                  :username (:username stash-conn)}
+        -        (log/info (str "Reading data from STASH file: " (:srcId options) f))
         response (api/getbytes options)]
-        ;retcode (:code (parse-string response true))]
     (if (not (bytes? response))
-        (ex-info "STASH read failed" response)
+        (do
+            (log/error (str "Writing data to STASH failed, response: " response))
+            (ex-info "STASH read failed" (parse-string response true))
+        )
         response
     )
   )
@@ -42,9 +45,10 @@
 ; ToDo how to handle overwrites?
 ; ToDo what format is 'f' - a full path or just a filename?
 (defn write
-  "Writes a byte-array 'data' to a file 'f' to the STASH vault"
+  "Writes a byte-array 'data' to a file 'f' to the STASH vault
+   Returns an exception (doesn't throw one) if writing fails"
   [stash-conn f data]
-  (let [options {:dstId (str "destFolderNames=My Home|" (:ledger-prefix stash-conn) ",destFileName=" f)
+  (let [options {:dstId (str "destFolderNames=" (:ledger-prefix stash-conn) ",destFileName=" f)
                  :id (:id stash-conn)
                  :pw (:pw stash-conn)
                  :endpoint (:endpoint stash-conn)
@@ -53,10 +57,14 @@
                  :filekey (:filekey stash-conn)
                  :username (:username stash-conn)
                  }
+        -        (log/info (str "Writing data to STASH file: " (:dstId options) f))
         response (api/putbytes options data)
         retcode (:code (parse-string response true))]
      (if (not= 200 retcode)
-        (ex-info "STASH write failed" response)
+        (do
+            (log/error (str "Writing data to STASH failed, response: " response))
+            (ex-info "STASH write failed" (parse-string response true))
+        )
         response)
   )
 )
@@ -66,12 +74,14 @@
   [stash-conn base-path]
   (fn [f data]
     (async/thread
-      (write stash-conn f data))))
+      (do
+        (log/info "connection-storage-write()")
+        (write stash-conn f data)))))
 
 (defn list
   "Returns a sequence of data maps with keys `#{:name :size :url}` representing the files in this STASH vault"
   [stash-conn base-path path]
-  (let [options {:srcId (str "folderNames=My Home|" (:ledger-prefix stash-conn) ",outputType=1")
+  (let [options {:srcId (str "folderNames=" (:ledger-prefix stash-conn) ",outputType=1")
                  :id (:id stash-conn)
                  :pw (:pw stash-conn)
                  :endpoint (:endpoint stash-conn)
@@ -89,12 +99,14 @@
   [stash-conn base-path]
   (fn [path]
     (async/thread
-      (list stash-conn))))
+        (do
+            (log/info "connection-storage-list(), base-path: " base-path "path: " path)
+            (list stash-conn base-path path)))))
 
 (defn exists
   "Determines if a file 'f' exists in the storage location"
   [stash-conn f]
-  (let [options {:srcId (str "folderNames=My Home|" (:ledger-prefix stash-conn) ",fileName=" f)
+  (let [options {:srcId (str "folderNames=" (:ledger-prefix stash-conn) ",fileName=" f)
                  :id (:id stash-conn)
                  :pw (:pw stash-conn)
                  :endpoint (:endpoint stash-conn)
@@ -117,7 +129,7 @@
 (defn delete
   "Deletes the specified file 'f'"
   [stash-conn f]
-  (let [options {:srcId (str "folderNames=My Home|" (:ledger-prefix stash-conn) ",fileName=" f) :id (:id stash-conn)  :pw (:pw stash-conn) :endpoint (:endpoint stash-conn) :verbose (:verbose stash-conn)}]
+  (let [options {:srcId (str "folderNames=" (:ledger-prefix stash-conn) ",fileName=" f) :id (:id stash-conn)  :pw (:pw stash-conn) :endpoint (:endpoint stash-conn) :verbose (:verbose stash-conn)}]
     (api/deletefile options)
   )
 )
@@ -132,7 +144,7 @@
 (defn rename
   "Renames the specified file 'old-f' to 'new-f'"
   [stash-conn old-f new-f]
-  (let [options {:srcId (str "folderNames=My Home|" (:ledger-prefix stash-conn) ",fileName=" old-f)
+  (let [options {:srcId (str "folderNames=" (:ledger-prefix stash-conn) ",fileName=" old-f)
                  :dstId (str "destFileName=" new-f)
                  :id (:id stash-conn)
                  :pw (:pw stash-conn)
