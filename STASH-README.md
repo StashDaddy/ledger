@@ -11,9 +11,8 @@ and add the values for the various 'fdb-storage-stash-'-prefixed properties.
 
 Set the 'fdb-storage-type' = stash
 
-In your STASH account, create 'ledger' and 'group' directories,
-and update the fdb-storage-stash-group-prefix and fdb-storage-stash-ledger-prefix
-properties accordingly.  You must use a "|" character in the property
-string to denote directory paths.  For example, if you create a My Home->ledger
-directory, then the fdb-storage-stash-ledger-prefix would be 'My Home|ledger'.
-
+In your STASH account, create 'ledger' and 'group' directories, create a
+snapshots directory in the group directory, and update the fdb-storage-stash-group-prefix
+and fdb-storage-stash-ledger-prefix properties accordingly. For example, if you 
+create a My Home/ledger directory, then the fdb-storage-stash-ledger-prefix would be 
+'My Home/ledger'.
