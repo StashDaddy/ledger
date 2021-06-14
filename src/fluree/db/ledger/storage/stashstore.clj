@@ -24,14 +24,23 @@
                  :filekey (:filekey stash-conn)
                  :username (:username stash-conn)}
         -        (log/info (str "Reading data from STASH file: " (:srcId options)))
-        response (api/getbytes options)
-        -        (log/info (str "Reading data from STASH file response: " response))]
-    (if (not (bytes? response))
-        (do
-            (log/error (str "Writing data to STASH failed, response: " response))
-            (ex-info "STASH read failed" (parse-string response true))
+        response (api/getbytes options)]
+    (if (= (String. (byte-array (->> response (take 7)))) "{\"code\"")
+      ; Error condition - API returned a JSON error code
+      (do
+        (let [parseResponse (parse-string (String. response) true)]
+          (log/error (str "Reading data from STASH failed, response: " (String. response)))
+          (if (= 404 (:code parseResponse))
+            nil     ; File Not Found - by convention in filestore.clj, return nil
+            (ex-info "STASH read failed" parseResponse)      ; If error other than file not found, return (but not throw) an exception
+          )
         )
+      )
+      ; If not an error condition, return the response as a byte array
+      (do
+        (log/info (str "Reading data from STASH file response: " response))
         response
+      )
     )
   )
 )
@@ -81,12 +90,14 @@
     (async/thread
       (do
         (log/info "connection-storage-write() base-path: " base-path " file: " f)
-        (write stash-conn base-path f data)))))
+        (write stash-conn base-path f data)
+        (Thread/sleep 2000)
+      ))))
 
 (defn list
   "Returns a sequence of data maps with keys `#{:name :size :url}` representing the files in this STASH vault"
   [stash-conn base-path path]
-  (let [options {:srcId (str "folderNames=" base-path path ",outputType=1")
+  (let [options {:srcId (str "filePath=" base-path path ",outputType=5")
                  :id (:id stash-conn)
                  :pw (:pw stash-conn)
                  :endpoint (:endpoint stash-conn)
@@ -94,10 +105,12 @@
         - (log/info "STASH list files in : " (:srcId options))
         response (api/listfiles options)
         retcode (:code (parse-string response true))
-        - (log/info "STASH list files: " response)]
+        files (:files (parse-string response true))
+        - (log/info "STASH list files: " files)]
+     ; Reformat response to {:name, :size :url}
      (if (not= 200 retcode)
         (throw (Exception. "Error Retrieving File List from Vault")))
-     (:files (parse-string response true))
+     (map (fn [f] {:name (:name f) :url "" :size (:size f)}) files)
   )
 )
 
