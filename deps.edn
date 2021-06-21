@@ -16,7 +16,7 @@
         com.cognitect.aws/s3 {:mvn/version "810.2.817.0"}
 
         ;; STASH API
-        global.stash/stashapi-jar {:mvn/version "0.9.5"}
+        global.stash/stashapi-jar {:mvn/version "0.9.8"}
 
         ;; web server
         aleph-middleware/aleph-middleware {:mvn/version "0.2.0"}

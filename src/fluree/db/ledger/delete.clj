@@ -65,7 +65,9 @@
   (go-try
     (let [indexer       (-> conn :full-text/indexer :process)
           db            (<? (session/db conn (str network "/" dbid) nil))]
-      (<? (indexer {:action :forget, :db db})))))
+      (if (some? indexer)
+        (<? (indexer {:action :forget, :db db}))
+      ))))
 
 (defn process
   "Deletes a current DB, deletes block files."
